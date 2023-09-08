@@ -4,26 +4,38 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/select.h>
+#include <sys/stat.h>
 #include <signal.h>
+#include <errno.h>
 
 #include "printfd.h"
 
+#ifndef VERBOSE
+#define VERBOSE 0
+#endif
+
+const char *base_path = "/tmp/openpty";
+char stdout_symlink[1024], stderr_symlink[1024];
 int our_fd_stdout, our_fd_stderr, gdb_fd_stdout, gdb_fd_stderr;
 char gdb_path_stdout[1024], gdb_path_stderr[1024];
-const char *known_stdout_path = "/tmp/gdb_stdout";
-const char *known_stderr_path = "/tmp/gdb_stderr";
 
 void graceful_exit(int sig_num) {
     close(gdb_fd_stdout);
     close(gdb_fd_stderr);
     close(our_fd_stdout);
     close(our_fd_stderr);
-    unlink(known_stdout_path);
-    unlink(known_stderr_path);
-	exit(0);
+    unlink(stdout_symlink);
+    unlink(stderr_symlink);
+	exit(1);
 }
 
-int main(void) {
+int main(int argc, char *argv[]) {
+    const char *name = (argc > 1) ? argv[1] : "default";
+    snprintf(stdout_symlink, sizeof(stdout_symlink), "%s/%s_stdout", base_path, name);
+    snprintf(stderr_symlink, sizeof(stderr_symlink), "%s/%s_stderr", base_path, name);
+
+    mkdir(base_path, 0777);
+
     if (openpty(&our_fd_stdout, &gdb_fd_stdout, gdb_path_stdout, NULL, NULL) == -1) {
         perror("openpty stdout");
         return 1;
@@ -33,15 +45,23 @@ int main(void) {
         return 1;
     }
 
-    symlink(gdb_path_stdout, known_stdout_path);
-    symlink(gdb_path_stderr, known_stderr_path);
+    if (symlink(gdb_path_stdout, stdout_symlink) == -1) {
+        perror("symlink stdout");
+        return 1;
+    }
+    if (symlink(gdb_path_stderr, stderr_symlink) == -1) {
+        perror("symlink stderr");
+        return 1;
+    }
+
+	if (VERBOSE) {
+		printf("pseudo-terminals created\n");
+		printf("set inferior-tty %s\n", gdb_path_stdout);
+		printf("2>%s\n", gdb_path_stderr);
+		printf("\n");
+	}
 
     signal(SIGINT, graceful_exit);
-
-    printf("pseudo-terminals created\n");
-    printf("set inferior-tty %s\n", known_stdout_path);
-    printf("2>%s\n", known_stderr_path);
-    printf("\n");
 
     fd_set read_fds;
     char buffer[256];
@@ -55,6 +75,9 @@ int main(void) {
         int max_fd = our_fd_stdout > our_fd_stderr ? our_fd_stdout : our_fd_stderr;
 
         if (select(max_fd + 1, &read_fds, NULL, NULL, NULL) == -1) {
+			if (errno == EINTR) {
+				graceful_exit(errno);
+			}
             perror("select");
             break;
         }
@@ -79,8 +102,6 @@ int main(void) {
             printfd(2, "%s\n", buffer);
         }
     }
-
-	graceful_exit(0);
 
     return 0;
 }
