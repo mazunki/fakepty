@@ -9,11 +9,11 @@ void printfd(int fd, const char *format, ...) {
 
     char *prefix;
     if (fd == 1) {
-        prefix = "[out]   ";
+        prefix = "[out]  ";
     } else if (fd == 2) {
-        prefix = "[error] ";
+        prefix = "[error]";
     } else {
-        prefix = "[other] ";
+        prefix = "[other]";
     }
 
     char buffer[1024];
@@ -21,10 +21,11 @@ void printfd(int fd, const char *format, ...) {
 
     char *line = strtok(buffer, "\n");
     while (line != NULL) {
-        printf("%s%s\n", prefix, line);
+        printf("%s ", prefix);
+		printf(format, line);
         line = strtok(NULL, "\n");
         if (line) {
-            prefix = "        ";  // Align with the previous prefix
+            prefix = "       ";
         }
     }
 
